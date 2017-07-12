@@ -1,3 +1,9 @@
-# Playbook to deploy pebbles-smoketest
+# Playbook to deploy pebbles-smoke-test
 
-AKA my first try at Ansible Heat.
+AKA an adventure in deploying stacks using Heat.
+
+Might be incorporated into pebbles-deploy in the near future. Might not,
+depends on philosophical things mostly.
+
+For playbook structure refer to https://github.com/cscfi/pouta-ansible-cluster
+
