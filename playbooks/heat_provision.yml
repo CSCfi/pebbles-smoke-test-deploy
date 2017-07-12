@@ -1,0 +1,90 @@
+---
+- hosts: localhost
+  gather_facts: no
+  connection: local
+  tasks:
+    - include: environment_context.yml
+    - name: Add public key to OpenStack for {{ cluster_name }}
+      os_keypair:
+        state: present
+        name: "{{ cluster_name }}"
+        public_key: "{{ id_rsa_pub }}"
+    - name: check if stack has been provisioned already
+      shell: openstack stack show {{ cluster_name }}
+      register: stack_output
+      failed_when: false
+      changed_when: false
+      tags:
+        - skip_ansible_lint
+        # there is ansbile-y way to check known at 2
+        #2.3.1.
+    - name: set fact for common referencing
+      set_fact:
+        server_name: "{{ cluster_name }}-solo"
+        group_name: "{{ group|default('smoketest') }}"
+        #this one is mirrored in ansible.cfg
+        ssh_config_file: "/tmp/smoketest.ssh.config"
+    - block:
+      - name: Build the Solo Heat stack
+        register: heat_stack
+        os_stack:
+          name: "{{ cluster_name }}"
+          state: present
+          template: "files/solo-server.yml"
+          wait: yes
+          parameters:
+            #solo_allow_cidrs: "{{ solo_allow_cidrs }}"
+            group: "{{ group_name }}"
+            key_name: "{{ cluster_name }}"
+            server_name: "{{ server_name }}"
+            secgroup_ext_access_rules:
+              "{{ secgroup_ext_access_rules|default({})}}"
+            solo_cloud_config: "{{ solo_cloud_config|default({}) }}"
+            solo_network_cidr: "{{ solo_network_cidr }}"
+            solo_router: "{{ solo_router }}"
+            solo_vm_image: "{{ solo_vm_image|default('Centos-7') }}"
+            solo_vm_flavor: "{{ solo_vm_flavor|default('standard.tiny')}}"
+            stack_name: "{{ cluster_name }}"
+      - name: Associate floating IP with solo node
+        os_floating_ip:
+          server: "{{ server_name }}"
+          floating_ip_address: "{{ public_ip }}"
+      when:
+      - stack_output.stderr.find('Stack not found') != -1
+
+    - name: debug
+      debug:
+        msg: "Refreshing inventory. This may take a while."
+
+    - name: Refresh dynamic inventory
+      meta: refresh_inventory
+
+    - name: add global ssh config
+      blockinfile:
+        create: yes
+        mode: '0600'
+        dest: "{{ ssh_config_file }}"
+        block: |
+          Host *
+            ForwardAgent no
+            GSSAPIAuthentication no
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+        marker: "# {mark} ANSIBLE MANAGED BLOCK for global options"
+    - name: add ssh config entries for solo host
+      blockinfile:
+        create: yes
+        mode: '0600'
+        dest: "{{ ssh_config_file }}"
+        block: |
+          Host {{ server_name }} {{ public_ip }}
+              HostName {{ public_ip }}
+        marker: "# {mark} ANSIBLE MANAGED BLOCK {{ cluster_name }}: {{ server_name }}"
+      when:
+    - name: Wait for connectivity on port 22 on the solo server on public port
+      wait_for:
+        host: "{{ hostvars[server_name]['openstack']['public_v4'] }}"
+        port: 22
+        search_regex: "OpenSSH"
+        delay: 5
+        timeout: 15

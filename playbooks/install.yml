@@ -1,0 +1,7 @@
+- name: install pebbles-smoke-test and set it up
+  hosts:
+    - "{{ group }}"
+  become: yes
+  roles:
+    - smoke_test
+  remote_user: cloud-user

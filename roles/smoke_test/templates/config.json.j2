@@ -1,0 +1,17 @@
+{
+  "url": "{{ pebbles_url }}",
+  "email": "{{ pebbles_smoke_tester }}",
+  "password": "{{ pebbles_smoke_tester_password }}",
+  "blueprints": [
+  {% set comma = joiner(",") %}
+  {% for item in blueprints %}
+    {{ comma() }}"{{ item }}"
+  {% endfor %}
+  ],
+  "timeouts": {
+    "start": {{ start_timeout|default(120) }},
+    "shutdown": {{ shutdown_timeout|default(60) }}
+  },
+  "driver": "{{ driver|default('PhantomJS') }}",
+  "img_path": "{{ img_path|default('.') }}"
+}

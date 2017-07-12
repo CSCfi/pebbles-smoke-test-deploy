@@ -1,0 +1,117 @@
+---
+# for installing phantomjs see https://gist.github.com/ianchen06/db12a2ecc7f1218f8e7e
+- name: install items using yum
+  yum:
+    name: "{{ item }}"
+    state: present
+  become: yes
+  with_items:
+    - nginx
+    - python-pip
+    - fontconfig
+    - freetype
+    - freetype-devel
+    - fontconfig-devel
+    - libstdc++
+    - libffi-devel
+    - openssl-devel
+    - bzip2
+    - unzip
+    - python-devel
+
+- name: download PhantomJS
+  get_url:
+    url: "{{ phantomjs_url }}"
+    dest: /tmp/phantomjs.tar.bz2
+  become: yes
+
+- name: make install path for PhantomJS
+  file:
+    path: /opt/phantomjs/
+    recurse: yes
+  become: yes
+
+- name: unpack PhantomJS for a lightweight install
+  unarchive:
+    src: /tmp/phantomjs.tar.bz2
+    dest: /opt/phantomjs/
+    remote_src: yes
+    extra_opts:
+      - "--strip-components=1"
+  become: yes
+
+- name: upgrade pip
+  pip:
+    name: pip
+    state: latest
+  become: yes
+  tags:
+    - skip_ansible_lint
+
+- name: install pip dependencies for phantomjs
+  pip:
+    name: "{{ item }}"
+  with_items:
+    - "pyopenssl"
+    - "pyasn1"
+    - "requests[security]"
+  become: yes
+
+- name: install pip dependencies for phantomjs
+  pip:
+    name: "git+https://github.com/CSCFi/pebbles-smoke-test.git"
+    editable: false
+  become: yes
+
+- name: make cloud-user owned directory
+  file:
+    path: /usr/share/nginx/html/smoke/
+    owner: cloud-user
+    group: cloud-user
+    mode: 0755
+    state: directory
+    seuser: system_u
+    setype: httpd_sys_content_t
+  become: yes
+
+- name: make cloud-user owned file
+  file:
+    path: /usr/share/nginx/html/smoke/status.txt
+    owner: cloud-user
+    group: cloud-user
+    mode: 0755
+    state: touch
+    seuser: system_u
+    setype: httpd_sys_content_t
+  become: yes
+
+- name: upload config
+  template:
+    src: config.json.j2
+    dest: "~/config.json"
+  become: no
+
+- name: add phantomjs to path for cloud-user
+  blockinfile:
+    create: yes
+    mode: '0644'
+    dest: "~/.bash_profile"
+    block: |
+      PATH=$PATH:/opt/phantomjs/bin/
+      export PATH
+    marker: "# {mark} ANSIBLE MANAGED BLOCK for phantomjs path"
+  become: no
+
+- name: add cron entry for
+  cron:
+    name: smoke test
+    minute: "*/15" # run every 15 minutes, timeout in 14 minutes
+    job: >
+      timeout {{ 60 * 14 }} pebbles-smoke-test -c ~/config.json -o
+      /usr/share/nginx/html/smoke/status.txt
+  become: no
+
+- name: NGINX | Starting NGINX
+  service:
+    name: nginx
+    state: started

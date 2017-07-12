@@ -1,0 +1,153 @@
+---
+heat_template_version: 2015-10-15
+
+description: >
+  Provision resources for one simple solo server. No bastion created so make
+  sure you create SSH access rules for the instance.
+
+parameters:
+  group:
+    description: >
+      The group(s), comma-separated to which to attach this server.
+    type: string
+    default: 'solo'
+  stack_name:
+    description: >
+      A name for the environment to be used for naming resources.
+    type: string
+    default: { get_param: 'OS::stack_name' }
+  solo_allow_ports:
+    description: >
+      Which ports to allow connections to on the bastion host.
+    type: comma_delimited_list
+    default: '22'
+  solo_allow_cidrs:
+    description: >
+      The CIDRs of the networks where the bastion host should be accessible
+      from.
+    type: comma_delimited_list
+    default: '0.0.0.0/0'
+  solo_network_dns_servers:
+    description: >
+      What DNS servers to use in the dedicated cluster network.
+    type: comma_delimited_list
+    default: '193.166.4.24,193.166.4.25'
+  secgroup_ext_access_rules:
+    description: >
+      Rules for the security group that governs external access to the system.
+    type: json
+  solo_network_cidr:
+    description: >
+      What CIDR to use for the dedicated cluster network.
+    type: string
+    default: '192.168.10.0/24'
+  key_name:
+    description: >
+      The name of the SSH key to initially insert into VMs.
+    type: string
+  solo_vm_image:
+    description: >
+      What OpenStack image to use for the bastion host.
+    type: string
+  solo_vm_flavor:
+    description: >
+      What OpenStack flavor to use for VM.
+    type: string
+  solo_cloud_config:
+    description: >
+      Configuration for cloud-init for the solo host.
+    type: json
+  solo_router:
+    description: >
+      The router to which the dedicated cluster network should be connected to
+      for external access.
+    type: string
+  server_name:
+    description: >
+      A name for the environment to be used for naming resources.
+    type: string
+
+
+resources:
+
+  #-----------------------------------
+  # Security groups
+  #-----------------------------------
+
+  secgroup_solo:
+    type: secgroup.yaml
+    properties:
+      env_name: { get_param: stack_name }
+      name_suffix: "solo"
+      rules:
+        repeat:
+          for_each:
+            <%port%>: { get_param: solo_allow_ports }
+            <%cidr%>: { get_param: solo_allow_cidrs }
+          template:
+            protocol: tcp
+            port_range_min: <%port%>
+            port_range_max: <%port%>
+            remote_ip_prefix: <%cidr%>
+
+  secgroup_ext_access:
+    type: secgroup.yaml
+    properties:
+      env_name: { get_param: stack_name }
+      name_suffix: "ext-access"
+      rules: { get_param: secgroup_ext_access_rules }
+
+  #-----------------------------------
+  # Dedicated cluster network
+  #-----------------------------------
+
+  solo_network:
+    type: OS::Neutron::Net
+    properties:
+       name:
+         str_replace:
+            template: env_name-name_suffix
+            params:
+              env_name: { get_param: stack_name }
+              name_suffix: "network"
+
+  solo_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      network_id: { get_resource: solo_network }
+      cidr: { get_param: solo_network_cidr }
+      dns_nameservers: { get_param: solo_network_dns_servers }
+
+  solo_subnet_router_interface:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router: { get_param: solo_router }
+      subnet: { get_resource: solo_subnet }
+
+  #-----------------------------------
+  # Solo VM
+  #-----------------------------------
+
+  cloud_config_resource:
+    type: "OS::Heat::CloudConfig"
+    properties:
+      cloud_config: { get_param: solo_cloud_config }
+
+  solo:
+    type: OS::Nova::Server
+    depends_on: "solo_subnet"
+    properties:
+      name: { get_param: server_name }
+      image: { get_param: solo_vm_image }
+      networks:
+        - network: { get_resource: solo_network }
+      flavor: { get_param: solo_vm_flavor }
+      metadata:
+        group: { get_param: group }
+        stack: { get_param: stack_name }
+      key_name: { get_param: key_name }
+      security_groups:
+        - { get_resource: secgroup_solo }
+        - { get_resource: secgroup_ext_access }
+      user_data: { get_resource: cloud_config_resource }
+      user_data_format: RAW

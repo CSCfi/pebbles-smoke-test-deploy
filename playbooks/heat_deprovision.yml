@@ -1,0 +1,17 @@
+---
+
+- hosts: localhost
+  gather_facts: no
+  connection: local
+  tasks:
+    - include: environment_context.yml
+    - name: Disassociate floating IP from server
+      os_floating_ip:
+        server: "{{ cluster_name }}-solo"
+        floating_ip_address: "{{ public_ip }}"
+        state: absent
+    - name: Delete stack {{ cluster_name }}
+      os_stack:
+        name: "{{ cluster_name }}"
+        state: absent
+        wait: yes
